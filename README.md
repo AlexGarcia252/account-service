@@ -1,87 +1,142 @@
-# account-service
+# Account Service (Microservicio de Cuentas)
 
-This project uses Quarkus, the Supersonic Subatomic Java Framework.
+Microservicio encargado de la gestión de cuentas corrientes, administración de saldos y operaciones de débito/crédito. Forma parte del sistema de transferencias bancarias y se comunica de manera síncrona vía HTTP REST con el microservicio de clientes (`customer-service`).
 
-If you want to learn more about Quarkus, please visit its website: <https://quarkus.io/>.
+---
 
-## Running the application in dev mode
+## 1. Descripción de la Arquitectura
 
-You can run your application in dev mode that enables live coding using:
+* **Framework:** Quarkus (Java 17+)
+* **Capa Web:** RESTEasy Reactive con serialización JSON (Jackson) y Bean Validation
+* **Cliente HTTP:** Quarkus REST Client Reactive (comunicación síncrona inter-servicio)
+* **Persistencia:** Hibernate ORM con Panache (patrón Active Record)
+* **Base de Datos:** PostgreSQL independiente (`account_db`)
+* **Observabilidad:** SmallRye Health (`/q/health`) y Micrometer Prometheus (`/q/metrics`)
+* **Comunicación:** Síncrona vía HTTP/REST
 
-```shell script
-./mvnw quarkus:dev
+### Integración Inter-Servicio
+Al registrar una nueva cuenta corriente, `account-service` invoca síncronamente el endpoint `GET /customers/{id}` de `customer-service` mediante `CustomerRestClient`. Si el cliente no existe o el servicio no responde, la creación de la cuenta se cancela inmediatamente garantizando consistencia referencial.
+
+---
+
+## 2. Instrucciones de Ejecución
+
+### Prerrequisitos
+* Java Development Kit (JDK) 17 o superior
+* PostgreSQL ejecutándose localmente en el puerto `5432` con una base de datos llamada `account_db`
+* Microservicio `customer-service` corriendo en `http://localhost:8081`
+
+### Pasos para iniciar
+
+1. Clonar el repositorio y entrar a la carpeta del proyecto:
+   ```bash
+   cd account-service
+   ```
+
+2. Verificar o ajustar credenciales en `src/main/resources/application.properties`:
+   ```properties
+   quarkus.http.port=8082
+   quarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/account_db
+   quarkus.datasource.username=postgres
+   quarkus.datasource.password=postgres
+   quarkus.rest-client.customer-api.url=http://localhost:8081
+   ```
+
+3. Ejecutar en modo desarrollo:
+   ```bash
+   ./mvnw quarkus:dev
+   ```
+   *En Windows:*
+   ```cmd
+   mvnw.cmd quarkus:dev
+   ```
+
+El servicio iniciará en: `http://localhost:8082`
+
+---
+
+## 3. Endpoints Disponibles
+
+| Método | Endpoint | Descripción | Requiere Auth |
+| :--- | :--- | :--- | :--- |
+| **GET** | `/accounts/{number}` | Consulta detalle de cuenta por número y saldo disponible (RF2) | No |
+| **GET** | `/accounts/customer/{customerId}` | Lista todas las cuentas asociadas a un cliente (RF2) | No |
+| **POST** | `/accounts` | Crea una cuenta validando síncronamente que el cliente exista | No |
+| **PUT** | `/accounts/{number}/debit?amount=X` | Realiza débito de saldo (validando fondos suficientes) | Interno |
+| **PUT** | `/accounts/{number}/credit?amount=X` | Realiza acreditación/abono de saldo | Interno |
+| **GET** | `/q/health` | Health checks de Liveness y Readiness | No |
+| **GET** | `/q/metrics` | Métricas del servicio en formato Prometheus | No |
+
+---
+
+## 4. Ejemplos de Uso (cURL)
+
+### Crear Cuenta Corriente (Validación Exitosa)
+```bash
+curl -X POST http://localhost:8082/accounts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "accountNumber": "456-789-001",
+    "customerId": 1,
+    "balance": 5000.00,
+    "accountType": "CHECKING",
+    "status": "ACTIVE"
+  }'
 ```
 
-> **_NOTE:_**  Quarkus now ships with a Dev UI, which is available in dev mode only at <http://localhost:8080/q/dev/>.
-
-## Packaging and running the application
-
-The application can be packaged using:
-
-```shell script
-./mvnw package
+**Respuesta (201 Created):**
+```json
+{
+  "id": 1,
+  "accountNumber": "456-789-001",
+  "customerId": 1,
+  "balance": 5000.00,
+  "accountType": "CHECKING",
+  "status": "ACTIVE"
+}
 ```
 
-It produces the `quarkus-run.jar` file in the `target/quarkus-app/` directory.
-Be aware that it’s not an _über-jar_ as the dependencies are copied into the `target/quarkus-app/lib/` directory.
-
-The application is now runnable using `java -jar target/quarkus-app/quarkus-run.jar`.
-
-If you want to build an _über-jar_, execute the following command:
-
-```shell script
-./mvnw package -Dquarkus.package.jar.type=uber-jar
+### Consultar Cuenta por Número
+```bash
+curl -X GET http://localhost:8082/accounts/456-789-001
 ```
 
-The application, packaged as an _über-jar_, is now runnable using `java -jar target/*-runner.jar`.
-
-## Creating a native executable
-
-You can create a native executable using:
-
-```shell script
-./mvnw package -Dnative
+**Respuesta (200 OK):**
+```json
+{
+  "id": 1,
+  "accountNumber": "456-789-001",
+  "customerId": 1,
+  "balance": 5000.00,
+  "accountType": "CHECKING",
+  "status": "ACTIVE"
+}
 ```
 
-Or, if you don't have GraalVM installed, you can run the native executable build in a container using:
-
-```shell script
-./mvnw package -Dnative -Dquarkus.native.container-build=true
+### Listar Cuentas de un Cliente
+```bash
+curl -X GET http://localhost:8082/accounts/customer/1
 ```
 
-You can then execute your native executable with: `./target/account-service-1.0.0-SNAPSHOT-runner`
+### Debitar Saldo
+```bash
+curl -X PUT "http://localhost:8082/accounts/456-789-001/debit?amount=200.00"
+```
 
-If you want to learn more about building native executables, please consult <https://quarkus.io/guides/maven-tooling>.
+### Acreditar Saldo
+```bash
+curl -X PUT "http://localhost:8082/accounts/456-789-001/credit?amount=300.00"
+```
 
-## Related Guides
+---
 
-- Micrometer Registry Prometheus ([guide](https://quarkus.io/guides/micrometer)): Enable Prometheus support for Micrometer
-- Hibernate Validator ([guide](https://quarkus.io/guides/validation)): Bean validation using Hibernate Validator and Jakarta Validation annotations
-- REST Jackson ([guide](https://quarkus.io/guides/rest#json-serialisation)): Jackson serialization support for Quarkus REST. This extension is not compatible with the quarkus-resteasy extension, or any of the extensions that depend on it
-- Hibernate ORM with Panache ([guide](https://quarkus.io/guides/hibernate-orm-panache)): Simplified JPA/Hibernate data access layer with active record and repository patterns
-- SmallRye Health ([guide](https://quarkus.io/guides/smallrye-health)): Monitor service health
-- JDBC Driver - PostgreSQL ([guide](https://quarkus.io/guides/datasource)): Connect to the PostgreSQL database via JDBC
+## 5. Datos de Prueba
 
-## Provided Code
+### Conexión a Base de Datos Local
+* **Host:** `localhost:5432`
+* **Base de Datos:** `account_db`
+* **Usuario / Contraseña:** `postgres` / `postgres`
 
-### Hibernate ORM
-
-Create your first JPA entity
-
-[Related guide section...](https://quarkus.io/guides/hibernate-orm)
-
-
-[Related Hibernate with Panache section...](https://quarkus.io/guides/hibernate-orm-panache)
-
-
-### REST
-
-Easily start your REST Web Services
-
-[Related guide section...](https://quarkus.io/guides/getting-started-reactive#reactive-jax-rs-resources)
-
-### SmallRye Health
-
-Monitor your application's health using SmallRye Health
-
-[Related guide section...](https://quarkus.io/guides/smallrye-health)
+### Cuentas Recomendadas para Pruebas de Transferencia
+* **Cuenta Origen:** `456-789-001` (Saldo inicial: 5000.00, Cliente: 1)
+* **Cuenta Destino:** `456-789-002` (Saldo inicial: 1000.00, Cliente: 1)
