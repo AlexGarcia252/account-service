@@ -3,6 +3,7 @@ package com.bank.account.resource;
 import com.bank.account.client.CustomerRestClient;
 import com.bank.account.dto.AccountResponseDTO;
 import com.bank.account.entity.Account;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
@@ -46,6 +47,7 @@ public class AccountResource {
     // Método auxiliar para crear cuentas (valida síncronamente contra customer-service)
     @POST
     @Transactional
+    @RolesAllowed({"ROLE_ADMIN", "ROLE_USER"})
     public Response createAccount(@Valid Account account) {
         // 1. Llamada HTTP síncrona al customer-service
         try {
@@ -67,6 +69,7 @@ public class AccountResource {
     @PUT
     @Path("/{number}/debit")
     @Transactional
+    @RolesAllowed({"ROLE_ADMIN", "ROLE_USER"})
     public Response debit(@PathParam("number") String number, @QueryParam("amount") BigDecimal amount) {
         Account account = Account.find("accountNumber", number).firstResult();
         if (account == null || account.balance.compareTo(amount) < 0) {
@@ -81,6 +84,7 @@ public class AccountResource {
     @PUT
     @Path("/{number}/credit")
     @Transactional
+    @RolesAllowed({"ROLE_ADMIN", "ROLE_USER"})
     public Response credit(@PathParam("number") String number, @QueryParam("amount") BigDecimal amount) {
         Account account = Account.find("accountNumber", number).firstResult();
         if (account == null) {
